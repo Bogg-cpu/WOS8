@@ -1,0 +1,141 @@
+The WOS8 Architecture, Iteration 2
+Contributors: Bogg
+
+Pronounciation: "Wahs-Eight"
+
+The current state of this file is to be considered more a mental map of the envisioned final product, rather than the current state of the project.
+
+WOS8 at a glance:
+
+WOS8 is an 8-bit Emulated CPU, made for LUAU (the Roblox LUA), designed for use in the game "Waste Of Space" and its Microcontroller part.
+
+###CPU ARCHITECTURE###
+8-bit main, 16 bit memory addressing, 8 bit memory width
+decimal-based, Lua has low support for binary operations
+
+###CPU NOTES###
+all operations are source -> target
+
+As a custom architecture, WOS8 will need to have a custom compiler if i don't want to write programs in assembly, with preferably from a low level language like C into the WOS8 binary.
+
+instructions formed as follows:
+opcode: 8b
+reg 1 (source): 4b
+reg 2 (target): 4b
+
+total: 16b
+
+###CPU REGISTERS###
+A: 8 bit accumulator
+B: 8 bit GPR
+C: 8 bit GPR
+D: 8 bit GPR
+E: 8 bit GPR
+###PROGRAM AND STACK###
+RX: Return Memory X
+RY: Return Memory Y
+IRX: Interrupt Register X
+IRY: Interrupt Register Y
+MX: 8 bit MAR (low)
+MY: 8 bit MAR (high)
+PCX: 8 bit program counter X
+PCY: 8 bit program counter Y
+SP: 8 bit stack pointer (FILO)
+###CPU FLAGS###
+ZF: zero flag
+CF: carry flag
+EF: equal flag
+ON: always on flag
+IR: interrupt request flag
+
+###OPCODES###
+revision 2, maximum operations changed from 16 to 256 in favor of CISC being easier on the nerves, both logically and mentally. ~Bogg
+
+  0: NOP (No Operation)
+  1: ADD (Addition)
+  2: SUB (Subtraction)
+  3: MUL (Multiplication)
+  4: DIV (Division)
+  5: INC (Increment)
+  6: DEC (Decrement)
+  7: MOV (Move)
+  8: MLX (Memory Location X)
+  9: MLY (Memory Location Y)
+  10: LOD (Load Memory)
+  11: STO (Store Memory)
+  12: JMP (Jump)
+  13: JZ (Jump if ZF)
+  14: JNZ (Jump if Not ZF)
+  15: JC (Jump if CF)
+  16: JNC (Jump if Not CF)
+  17: JE (Jump if EF)
+  18: JNE (Jump if Not EF)
+  19: MIM (Move Immediate)
+  20: AND (Logical AND)
+  21: OR (Logical OR)
+  22: XOR (Logical XOR)
+  23: NOT (Logical NOT)
+  24: SHL (Shift Left or divide by 2)
+  25: SHR (Shift Right or multiply by 2)
+  26: YIR (Yield Interrupt Request): if there's an IRQ, break program into the interrupt handler, storing the current PCX/PCY in IRX/IRY.
+  27: RTI (Return from Interrupt): return from the IH, setting the IR flag to 0, and setting the PCX and PCY to the RX and RY values.
+  28: HLI (Halt Interrupt): Halt the CPU, and waiting for an interrupt. Basically YIR but it waits for an interrupt instead of NOPping when no interrupt is pending.
+  29: PSH (Push to Stack): push the selected register onto the stack, incrementing SP.
+  30: POP (Pop from Stack): pop the top of the stack into the selected register, decrementing SP.
+  31: HLT (Halt): Halts the CPU, without waiting for an interrupt, basically kills the CPU until poweroff.
+  
+
+###INTERRUPTS###
+What defines an interrupt: Any external event that can cause a change in the CPU, such as a key press, a timer, or some other non-CPU event.
+How do we handle interrupts: any changes to the IR flag are ignored until the next YIR instruction, which is similar to an if-then statement. If the IR flag is set, the CPU will break into the interrupt handler's vector, and upon returning, the IR flag will be set to 0.
+In an interrupt sequence, the CPU should not access the main registers, but instead use IRX and IRY as temporary registers, similar to the ghost registers on the Z80.
+
+Interrupts are mainly for the keyboard, which will raise the flag when new data is available.
+Data from the keyboard will be sliced into each byte, and placed in a 256-byte buffer, built onto the keyboard's memory. This means texts above 256 characters will be truncated, and a beep will come from the keyboard to indicate a truncation.
+###MAIN MEMORY###
+
+  ###STACK###
+    The stack is a small section of RAM, appearing at address 0, and extending to address 255.
+    This allows the CPU to access the stack directly by MLXing to the stack when MLY is 0.
+    The difference between GEMming and POPping the stack is that GEMing directly modifies any stack element, without needing to disassemble the stack. It also does not change SP. Use with care, as you might desync the stack pointer or get data overwritten.
+
+    POPping the stack is the normal method of removing data from the stack. It changes SP, and removes the top element of the stack. As such, less care is needed to avoid data destruction.
+
+    The stack pointer is a 8 bit register, and is used to access the stack more conventionally.
+    The stack pointer is incremented by 1 every time a PSH instruction is executed, and decremented by 1 every POP.
+    The stack pointer is set to 255 when the stack is full, and set to 0 when the stack is empty.
+    On startup, SP is initialized at point 0, due to the fact that the stack is empty.
+
+    <<<WARNING>>>
+    The stack has no bounds checking, as such, the SP can extend to outside of the stack, causing data destruction. It also means malicious code can simply PSH (0) to the stack indefinitely, causing the CPU to overwrite RAM en masse. If the malicious program is able to write itself to the end of memory, it can completely blank the RAM before it destroys itself in the process.
+
+  ###GPIO###
+    GPI is a small section of the RAM, appearing just after stack, spanning 2 bytes.
+    (256->257)
+    This allows for a small amount of data input through GPI.
+    Every iteration of the CPU, the GPI pins are checked for input, and the input is automatically pushed to the GPI mem-field.
+
+    GPO is another section of the RAM, appearing just after GPI, spanning 2 bytes.
+    (257->258)
+    This allows for a small amount of data output through GPO.
+    Every iteration of the CPU, the GPO mem-field is checked, and the values are automatically pushed to the GPO pins outside of the CPU.
+
+    These two sections are for user input and output, respectively.
+    ###POSSIBLE GPIO EQUIPMENTS###
+    - switch system to direct GPI/O input/output across multiple targets
+    - keyboard/mouse combination requiring all 8 GPI, 7 are needed for either keyboard or mouse, and 1 is needed for the switch between them.
+  <<GPI/O is currently not supported in this iteration of the CPU.>>
+
+  ###CHARACTER MEMORY###
+    Character memory is a medium sized section of RAM, starting at address 259. it stores the characters displayed on screen in a 35x20 grid.
+    Each character is displayed as a single byte, allowing all ASCII characters to be displayed.
+    The positions of characters and their font will be constructed in a coprocessor directly from the RAM.
+    (259->959)
+
+  ###INTERRUPT HANDLERS###
+    Interrupt handlers are a small section of RAM, with the first appearing at address 960.
+      Each interrupt handler program is 300 bytes long (100 instructions), and nominally should be terminated with a RTI instruction. Nested interrupts are not supported due to the nature of the shadow registers, and as such, interrupt handlers should not contain YIR or HLI instructions. Interrupts should also not use any persistent memory, such as the stack, as there may a risk of data loss and pointer context loss. (pointer may no longer be where it was when the interrupt handler was called, but the program does not know about this change)
+    (960->2160)
+  ###PROGRAM MEMORY###
+    This is the free space after all system RAM, this may be freely used by any program.
+    (2160->65535)
